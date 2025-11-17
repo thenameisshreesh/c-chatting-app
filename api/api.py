@@ -1,62 +1,48 @@
 from flask import Flask, request, jsonify
-import os
 import requests
-import time
+import smtplib
+from email.message import EmailMessage
 
 app = Flask(__name__)
 
-# --- YOUR FIXED SUPABASE SETTINGS ---
+# Supabase credentials
 SUPABASE_URL = "https://cvnuwppsgrhzvmlfxxzb.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2bnV3cHBzZ3JoenZtbGZ4eHpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI3Nzg3NjEsImV4cCI6MjA3ODM1NDc2MX0.7IhHKZdeIOLUScF4ui2xhSSxlok1FZVdQoUOtXAcaZA"
-SUPABASE_TABLE = "messages"
-# ------------------------------------
 
-def supabase_headers():
-    return {
-        'apikey': SUPABASE_KEY,
-        'Authorization': f'Bearer {SUPABASE_KEY}',
-        'Content-Type': 'application/json'
-    }
+def send_email(to_email, name):
+    msg = EmailMessage()
+    msg.set_content(f"Hello {name}, your data has been submitted successfully!")
+    msg['Subject'] = 'Data Submission Success'
+    msg['From'] = "shreeshpitambare084@gmail.com"
+    msg['To'] = to_email
 
-@app.route('/api/send', methods=['POST'])
-def send():
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+        smtp.login("shreeshpitambare084@gmail.com", "fsyo gokf lnqh yywy")
+        smtp.send_message(msg)
+
+@app.route("/api/submit", methods=["POST"])
+def submit():
     data = request.get_json()
-    if not data:
-        return jsonify({'error':'no json'}), 400
+    name = data.get("name")
+    email = data.get("email")
+    roll = data.get("roll")
 
-    payload = {
-        "sender": data['sender'],
-        "receiver": data['receiver'],
-        "enc_message": data['enc_message'],
-        "enc_aes_key": data['enc_aes_key'],
-        "profile": data.get('profile', None),
-        "created_at": int(time.time())
+    # 1️⃣ Insert data into Supabase
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json"
     }
+    payload = {"name": name, "email": email, "roll": roll}
+    supabase_resp = requests.post(SUPABASE_URL, json=payload, headers=headers)
 
-    r = requests.post(
-        f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}",
-        headers=supabase_headers(),
-        json=payload
-    )
-    if r.status_code in (200,201):
-        return jsonify({'ok': True}), 201
-    else:
-        return jsonify({'error': r.text}), r.status_code
+    if supabase_resp.status_code not in [200, 201]:
+        return jsonify({"status": "error", "message": "Failed to store data"}), 500
 
-@app.route('/api/messages', methods=['GET'])
-def messages():
-    receiver = request.args.get('receiver')
-    since = request.args.get('since', '0')
-    if not receiver:
-        return jsonify({'error':'receiver required'}), 400
+    # 2️⃣ Send email
+    try:
+        send_email(email, name)
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Email sending failed: {e}"}), 500
 
-    q = f"?receiver=eq.{receiver}&created_at=gte.{since}&order=created_at.asc"
-    r = requests.get(f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}{q}", headers=supabase_headers())
-    if r.status_code == 200:
-        return jsonify(r.json()), 200
-    else:
-        return jsonify({'error': r.text}), r.status_code
-
-@app.route('/api/ping')
-def ping():
-    return jsonify({'pong': True})
+    return jsonify({"status": "success", "message": "Data stored and email sent successfully"})
